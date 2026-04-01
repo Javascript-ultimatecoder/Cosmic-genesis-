@@ -58,7 +58,10 @@ def serve_dashboard():
         <h1 class="text-8xl font-black text-center neon tracking-[0.9em] mb-6">Ω RAYO'S NUMBER OF GODS v∞+1</h1>
         <p class="text-center text-3xl text-purple-400">5500 Gods • 7 Rarity Classes • Quantum + Safe CAPTCHA Transcendence</p>
         <div class="grid grid-cols-16 gap-2 my-12 max-h-[80vh] overflow-y-auto p-2" id="pantheon"></div>
-        <div class="bg-black/70 border border-purple-500 p-14 rounded-3xl text-center">
+              <div class="text-center mb-8">
+            <div class="text-5xl font-black text-purple-300" id="godCount">5500</div>
+            <div class="text-sm text-purple-400">GODS AWAKENED • TIER <span id="liveTier">0</span></div>
+        </div>  <div class="bg-black/70 border border-purple-500 p-14 rounded-3xl text-center">
             <div id="event" class="text-4xl text-purple-300 min-h-[160px]">The Cosmos is awakening...</div>
             <div id="tier" class="text-8xl text-pink-400 mt-12 font-black">Tier 0</div>
             <button onclick="runBetaBot()" class="mt-8 px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 text-xl font-bold rounded-3xl">🚀 RUN BETABOT TEST</button>
@@ -71,17 +74,23 @@ def serve_dashboard():
         canvas.height = window.innerHeight;
         let particles = new Float32Array(750000 * 3);
         for(let i = 0; i < particles.length; i++) particles[i] = (Math.random() - 0.5) * 6000;
-        function engine() {
+                function engine() {
             ctx.clearRect(0,0,canvas.width,canvas.height);
             for(let i = 0; i < particles.length; i += 3) {
-                particles[i] += Math.sin(i) * 0.06;
-                ctx.fillStyle = '#00ffff';
-                ctx.fillRect(particles[i] + canvas.width/2, particles[i+1] + canvas.height/2, 3, 3);
+                particles[i] += Math.sin(i) * 0.06 + Math.random() * 0.1;
+                particles[i+1] += Math.cos(i) * 0.04;
+                
+                const alpha = Math.sin(Date.now()/1000 + i) * 0.5 + 0.5;
+                ctx.fillStyle = `rgba(0, 255, 255, ${alpha})`;
+                ctx.fillRect(particles[i] + canvas.width/2, particles[i+1] + canvas.height/2, 2.5, 2.5);
+                
+                if (Math.random() < 0.001) {
+                    ctx.fillStyle = '#ffff00';
+                    ctx.fillRect(particles[i] + canvas.width/2 - 3, particles[i+1] + canvas.height/2 - 3, 6, 6);
+                }
             }
             requestAnimationFrame(engine);
         }
-        engine();
-
         // 5500 Gods — exactly scaled
         const godsData = [
             ...Array(1400).fill(0).map((_,i) => ({name: `CommonGod-${i+1}`, rarity: "common", quantumState: "Stable"})),
@@ -204,7 +213,7 @@ def serve_dashboard():
         audit.record("betabot_quantum_mechanics", {"god": quantum_god, "collapse_state": collapse_state, "tunneling_probability": tunneling_prob})
         results.append({"test": "Quantum God Mechanics", "status": "PASS", "details": f"{quantum_god} collapsed to {collapse_state} state. Tunneling probability: {tunneling_prob:.2f}"})
 
-        # 16. CAPTCHA TRANSCENDENCE DEMO (safe, no real bypass)
+        # 16. CAPTCHA TRANSCENDENCE DEMO
         try:
             img = Image.new('RGB', (800, 400), color=(10, 0, 30))
             draw = ImageDraw.Draw(img)
