@@ -92,6 +92,27 @@ conn.execute(
     created_at TEXT
 )"""
 )
+conn.execute(
+    """CREATE TABLE IF NOT EXISTS zk_chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room TEXT NOT NULL,
+    username TEXT NOT NULL,
+    ciphertext BLOB NOT NULL,
+    nonce BLOB NOT NULL,
+    created_at TEXT NOT NULL
+)"""
+)
+conn.execute(
+    """CREATE TABLE IF NOT EXISTS zk_files (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    ciphertext BLOB NOT NULL,
+    nonce BLOB NOT NULL,
+    created_at TEXT NOT NULL
+)"""
+)
 conn.commit()
 
 
@@ -266,6 +287,116 @@ async def zk_vault_list(request: Request, limit: int = 25):
     return {"status": "success", "items": [{"ref": r[0], "created_at": r[1]} for r in rows]}
 
 
+@app.post("/zk_file_upload")
+async def zk_file_upload(request: Request, data: dict = Body(...)):
+    username = get_bearer_user(request)
+    filename = (data.get("filename") or "").strip()
+    mime_type = (data.get("mime_type") or "application/octet-stream").strip()
+    ciphertext = data.get("ciphertext", "")
+    nonce = data.get("nonce", "")
+    if not filename or not ciphertext or not nonce:
+        raise HTTPException(status_code=400, detail="filename, ciphertext, nonce required")
+
+    file_id = f"file-{secrets.token_hex(12)}"
+    conn.execute(
+        "INSERT INTO zk_files (id, username, filename, mime_type, ciphertext, nonce, created_at) VALUES (?,?,?,?,?,?,?)",
+        (
+            file_id,
+            username,
+            filename,
+            mime_type,
+            b64url_decode(ciphertext),
+            b64url_decode(nonce),
+            datetime.datetime.utcnow().isoformat(),
+        ),
+    )
+    conn.commit()
+    write_audit("zk_file_upload", request, username=username, target_ref=file_id)
+    return {"status": "success", "file_id": file_id}
+
+
+@app.post("/zk_file_download")
+async def zk_file_download(request: Request, data: dict = Body(...)):
+    username = get_bearer_user(request)
+    file_id = data.get("file_id", "")
+    if not file_id:
+        raise HTTPException(status_code=400, detail="file_id required")
+    row = conn.execute(
+        "SELECT filename, mime_type, ciphertext, nonce FROM zk_files WHERE id=? AND username=?",
+        (file_id, username),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="File not found")
+    write_audit("zk_file_download", request, username=username, target_ref=file_id)
+    return {
+        "status": "success",
+        "file_id": file_id,
+        "filename": row[0],
+        "mime_type": row[1],
+        "ciphertext": b64url_encode(row[2]),
+        "nonce": b64url_encode(row[3]),
+    }
+
+
+@app.get("/zk_file_list")
+async def zk_file_list(request: Request, limit: int = 25):
+    username = get_bearer_user(request)
+    rows = conn.execute(
+        "SELECT id, filename, mime_type, created_at FROM zk_files WHERE username=? ORDER BY created_at DESC LIMIT ?",
+        (username, limit),
+    ).fetchall()
+    write_audit("zk_file_list", request, username=username)
+    return {
+        "status": "success",
+        "items": [
+            {"file_id": r[0], "filename": r[1], "mime_type": r[2], "created_at": r[3]} for r in rows
+        ],
+    }
+
+
+@app.post("/zk_chat_send")
+async def zk_chat_send(request: Request, data: dict = Body(...)):
+    username = get_bearer_user(request)
+    room = (data.get("room") or "global").strip()
+    ciphertext = data.get("ciphertext", "")
+    nonce = data.get("nonce", "")
+    if not ciphertext or not nonce:
+        raise HTTPException(status_code=400, detail="ciphertext and nonce required")
+    conn.execute(
+        "INSERT INTO zk_chat_messages (room, username, ciphertext, nonce, created_at) VALUES (?,?,?,?,?)",
+        (room, username, b64url_decode(ciphertext), b64url_decode(nonce), datetime.datetime.utcnow().isoformat()),
+    )
+    msg_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.commit()
+    write_audit("zk_chat_send", request, username=username, target_ref=f"{room}:{msg_id}")
+    return {"status": "success", "message_id": msg_id}
+
+
+@app.get("/zk_chat_poll")
+async def zk_chat_poll(request: Request, room: str = "global", since_id: int = 0, limit: int = 50):
+    username = get_bearer_user(request)
+    rows = conn.execute(
+        """SELECT id, username, ciphertext, nonce, created_at FROM zk_chat_messages
+           WHERE room=? AND id>? ORDER BY id ASC LIMIT ?""",
+        (room, since_id, limit),
+    ).fetchall()
+    write_audit("zk_chat_poll", request, username=username, target_ref=room)
+    return {
+        "status": "success",
+        "room": room,
+        "items": [
+            {
+                "id": r[0],
+                "sender": r[1],
+                "ciphertext": b64url_encode(r[2]),
+                "nonce": b64url_encode(r[3]),
+                "created_at": r[4],
+            }
+            for r in rows
+        ],
+    }
+
+
 @app.post("/webauthn/register_begin")
 async def webauthn_register_begin(request: Request):
     username = get_bearer_user(request)
@@ -347,11 +478,24 @@ async def security_status(request: Request):
         "SELECT event, target_ref, ip, created_at FROM audit_log WHERE username=? ORDER BY id DESC LIMIT 20",
         (username,),
     ).fetchall()
+    failed_logins_last_hour = conn.execute(
+        """SELECT COUNT(*) FROM audit_log
+           WHERE username=? AND event='login_failed'
+           AND created_at >= ?""",
+        (
+            username,
+            (datetime.datetime.utcnow() - datetime.timedelta(hours=1)).isoformat(),
+        ),
+    ).fetchone()[0]
     return {
         "status": "success",
         "security_mode": "zero_knowledge",
         "jwt_enabled": True,
         "argon2id_enabled": ARGON2_AVAILABLE,
+        "anomaly_flags": {
+            "failed_logins_last_hour": failed_logins_last_hour,
+            "possible_bruteforce": failed_logins_last_hour >= 5,
+        },
         "notes": "Server stores ciphertext only; decryption key is client-derived.",
         "recent_events": [
             {"event": r[0], "target_ref": r[1], "ip": r[2], "created_at": r[3]} for r in logs
@@ -383,6 +527,14 @@ async def index():
     <input id="ref" class="p-2 text-black" placeholder="envelope ref" />
     <button class="bg-emerald-700 p-2" onclick="fetchZk()">Fetch + Decrypt (client)</button>
     <button class="bg-indigo-700 p-2" onclick="loadSecurity()">Security Status</button>
+    <input id="chatRoom" class="p-2 text-black" placeholder="chat room" value="global" />
+    <input id="chatMessage" class="p-2 text-black" placeholder="chat plaintext message" />
+    <button class="bg-purple-700 p-2" onclick="sendChat()">Send E2E Chat Message</button>
+    <button class="bg-purple-900 p-2" onclick="pollChat()">Poll E2E Chat Messages</button>
+    <input id="fileInput" class="p-2 text-black bg-white" type="file" />
+    <button class="bg-orange-700 p-2" onclick="uploadEncryptedFile()">Upload Encrypted File</button>
+    <input id="fileId" class="p-2 text-black" placeholder="file id" />
+    <button class="bg-orange-900 p-2" onclick="downloadEncryptedFile()">Download + Decrypt File</button>
     <pre id="out" class="bg-zinc-900 p-3 rounded whitespace-pre-wrap">Ready.</pre>
   </div>
 
@@ -476,6 +628,106 @@ async function fetchZk() {
 async function loadSecurity() {
   const res = await fetch('/security/status', {headers:{'Authorization':'Bearer '+token}});
   document.getElementById('out').innerText = JSON.stringify(await res.json(), null, 2);
+}
+
+async function sendChat() {
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  const room = document.getElementById('chatRoom').value || 'global';
+  const text = document.getElementById('chatMessage').value;
+  const key = await deriveAesKey(password, username + '::chat::' + room);
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({name:'AES-GCM', iv: nonce}, key, new TextEncoder().encode(text));
+  const res = await fetch('/zk_chat_send', {
+    method:'POST',
+    headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+token},
+    body: JSON.stringify({room, ciphertext: b64urlFromBuf(ciphertext), nonce: b64urlFromBuf(nonce)})
+  });
+  document.getElementById('out').innerText = JSON.stringify(await res.json(), null, 2);
+}
+
+let lastChatId = 0;
+async function pollChat() {
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  const room = document.getElementById('chatRoom').value || 'global';
+  const res = await fetch(`/zk_chat_poll?room=${encodeURIComponent(room)}&since_id=${lastChatId}`, {
+    headers:{'Authorization':'Bearer '+token}
+  });
+  const data = await res.json();
+  if (data.status !== 'success') {
+    document.getElementById('out').innerText = JSON.stringify(data, null, 2);
+    return;
+  }
+  const key = await deriveAesKey(password, username + '::chat::' + room);
+  const decrypted = [];
+  for (const item of data.items) {
+    lastChatId = Math.max(lastChatId, item.id);
+    try {
+      const ptBuf = await crypto.subtle.decrypt({name:'AES-GCM', iv: bufFromB64url(item.nonce)}, key, bufFromB64url(item.ciphertext));
+      decrypted.push({...item, plaintext: new TextDecoder().decode(ptBuf)});
+    } catch {
+      decrypted.push({...item, plaintext: '[unable to decrypt with your key]'});
+    }
+  }
+  document.getElementById('out').innerText = JSON.stringify({...data, items: decrypted}, null, 2);
+}
+
+async function uploadEncryptedFile() {
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  const input = document.getElementById('fileInput');
+  if (!input.files || !input.files[0]) {
+    document.getElementById('out').innerText = 'Choose a file first.';
+    return;
+  }
+  const file = input.files[0];
+  const fileBytes = new Uint8Array(await file.arrayBuffer());
+  const key = await deriveAesKey(password, username + '::files');
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({name:'AES-GCM', iv: nonce}, key, fileBytes);
+  const res = await fetch('/zk_file_upload', {
+    method:'POST',
+    headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+token},
+    body: JSON.stringify({
+      filename: file.name,
+      mime_type: file.type || 'application/octet-stream',
+      ciphertext: b64urlFromBuf(ciphertext),
+      nonce: b64urlFromBuf(nonce)
+    })
+  });
+  const data = await res.json();
+  if (data.file_id) document.getElementById('fileId').value = data.file_id;
+  document.getElementById('out').innerText = JSON.stringify(data, null, 2);
+}
+
+async function downloadEncryptedFile() {
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  const file_id = document.getElementById('fileId').value;
+  const res = await fetch('/zk_file_download', {
+    method:'POST',
+    headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+token},
+    body: JSON.stringify({file_id})
+  });
+  const data = await res.json();
+  if (data.status !== 'success') {
+    document.getElementById('out').innerText = JSON.stringify(data, null, 2);
+    return;
+  }
+  const key = await deriveAesKey(password, username + '::files');
+  const plain = await crypto.subtle.decrypt(
+    {name:'AES-GCM', iv: bufFromB64url(data.nonce)},
+    key,
+    bufFromB64url(data.ciphertext)
+  );
+  const blob = new Blob([plain], {type: data.mime_type || 'application/octet-stream'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = data.filename || 'decrypted.bin';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  document.getElementById('out').innerText = JSON.stringify({...data, downloaded: true}, null, 2);
 }
 </script>
 </body>
