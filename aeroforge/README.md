@@ -10,11 +10,14 @@ Insane v2 FastAPI app for paper airplane optimization with upload support, physi
 - Mobile-friendly modern UI
 - Ready for Render deployment
 
+## Python version
+- Python **3.11+** recommended (Python 3 required).
+
 ## Run locally
 ```bash
 cd aeroforge
 pip install -r requirements.txt
-uvicorn aeroforge_app:app --reload
+python3 -m uvicorn aeroforge_app:app --reload
 ```
 
 ## Deploy on Render
@@ -24,7 +27,7 @@ pip install -r requirements.txt
 ```
 - **Start Command**
 ```bash
-uvicorn aeroforge_app:app --host 0.0.0.0 --port $PORT
+python3 -m uvicorn aeroforge_app:app --host 0.0.0.0 --port $PORT
 ```
 
 ## API

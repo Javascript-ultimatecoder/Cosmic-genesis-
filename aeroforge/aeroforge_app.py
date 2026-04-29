@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import importlib.util
 import os
 import random
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 if importlib.util.find_spec("fastapi"):
     from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -23,12 +26,13 @@ else:
         getSampleStyleSheet,
     )
 
-app = FastAPI(title="AeroForge+", version="2.1")
+app = FastAPI(title="AeroForge+", version="2.2")
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".pdf"}
+SUPPORTED_MODES = {"Distance", "Airtime", "Height", "Hybrid"}
 
 
 @app.get("/")
@@ -37,7 +41,7 @@ def home():
         return HTMLResponse(f.read())
 
 
-def simulate(design: dict) -> float:
+def simulate(design: dict[str, float]) -> float:
     span_m = design["span"] / 1000
     chord_m = design["chord"] / 1000
     wing_area = span_m * chord_m
@@ -57,10 +61,10 @@ def simulate(design: dict) -> float:
     return (lift / max(weight, 1e-4)) * glide_ratio * balance_penalty
 
 
-def optimize(mode: str, extreme_mode: bool) -> tuple[dict, float]:
+def optimize(mode: str, extreme_mode: bool) -> tuple[dict[str, float], float]:
     best = {
-        "span": 210,
-        "chord": 65,
+        "span": 210.0,
+        "chord": 65.0,
         "angle": 5.0,
         "balance": 0.33,
         "mass": 8.0,
@@ -71,8 +75,8 @@ def optimize(mode: str, extreme_mode: bool) -> tuple[dict, float]:
     loops = 600 if extreme_mode else 220
     for _ in range(loops):
         new = {
-            "span": min(320, max(120, best["span"] + random.randint(-14, 14))),
-            "chord": min(120, max(35, best["chord"] + random.randint(-8, 8))),
+            "span": min(320.0, max(120.0, best["span"] + random.randint(-14, 14))),
+            "chord": min(120.0, max(35.0, best["chord"] + random.randint(-8, 8))),
             "angle": min(15.0, max(-2.0, best["angle"] + random.uniform(-1.2, 1.2))),
             "balance": min(0.48, max(0.2, best["balance"] + random.uniform(-0.045, 0.045))),
             "mass": min(20.0, max(4.0, best["mass"] + random.uniform(-0.8, 0.8))),
@@ -117,19 +121,22 @@ async def optimize_plane(
     if extension not in ALLOWED_EXTENSIONS:
         return {"error": "Only image/PDF uploads are supported."}
 
+    if mode not in SUPPORTED_MODES:
+        return {"error": f"Unsupported mode '{mode}'."}
+
     contents = await file.read()
     file_size_kb = round(len(contents) / 1024, 2)
 
     best, score = optimize(mode, extreme_mode)
 
     result_text = f"""
-Timestamp: {datetime.utcnow().isoformat()}Z
+Timestamp: {datetime.now(timezone.utc).isoformat()}
 Mode: {mode}
 Extreme mode: {extreme_mode}
 Input file: {file.filename}
 Input size: {file_size_kb} KB
-Span: {best['span']} mm
-Chord: {best['chord']} mm
+Span: {best['span']:.2f} mm
+Chord: {best['chord']:.2f} mm
 Angle: {best['angle']:.2f} deg
 Balance: {best['balance']:.3f}
 Mass: {best['mass']:.2f} g
@@ -162,5 +169,5 @@ def download(path: str):
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "app": app.title, "version": app.version}
+def health() -> dict[str, Any]:
+    return {"status": "ok", "app": app.title, "version": app.version, "python": "3"}
