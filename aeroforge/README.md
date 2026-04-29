@@ -6,7 +6,7 @@ Insane v2 FastAPI app for paper airplane optimization with upload support, physi
 - Upload image or PDF design references
 - Multi-objective optimization modes (Distance / Airtime / Height / Hybrid)
 - Extreme search mode for wider optimization loops
-- Downloadable PDF optimization report
+- Unique downloadable PDF optimization report per run
 - Mobile-friendly modern UI
 - Ready for Render deployment
 
@@ -26,3 +26,8 @@ pip install -r requirements.txt
 ```bash
 uvicorn aeroforge_app:app --host 0.0.0.0 --port $PORT
 ```
+
+## API
+- `POST /optimize` → Optimize based on uploaded file + options and returns `pdf_path`.
+- `GET /download?path=<pdf_path>` → Download generated report.
+- `GET /health` → Service health check.

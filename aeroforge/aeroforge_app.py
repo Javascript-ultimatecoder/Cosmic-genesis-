@@ -1,29 +1,34 @@
 import importlib.util
 import os
 import random
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 if importlib.util.find_spec("fastapi"):
-    from fastapi import FastAPI, UploadFile, File, Form
-    from fastapi.responses import HTMLResponse, FileResponse
+    from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+    from fastapi.responses import FileResponse, HTMLResponse
 else:
     from lightweight_fastapi import FastAPI, UploadFile, File, Form
     from lightweight_fastapi_responses import HTMLResponse, FileResponse
+
 if importlib.util.find_spec("reportlab"):
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 else:
     from lightweight_reportlab import (
-        SimpleDocTemplate,
         Paragraph,
+        SimpleDocTemplate,
         Spacer,
         getSampleStyleSheet,
     )
 
-app = FastAPI(title="AeroForge+", version="2.0")
+app = FastAPI(title="AeroForge+", version="2.1")
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".pdf"}
 
 
 @app.get("/")
@@ -32,7 +37,7 @@ def home():
         return HTMLResponse(f.read())
 
 
-def simulate(design):
+def simulate(design: dict) -> float:
     span_m = design["span"] / 1000
     chord_m = design["chord"] / 1000
     wing_area = span_m * chord_m
@@ -49,11 +54,10 @@ def simulate(design):
 
     balance_penalty = max(0.05, 1 - abs(design["balance"] - 0.33) * 2.2)
     glide_ratio = max(0.05, lift / max(drag, 1e-4))
-    score = (lift / max(weight, 1e-4)) * glide_ratio * balance_penalty
-    return score
+    return (lift / max(weight, 1e-4)) * glide_ratio * balance_penalty
 
 
-def optimize(mode: str, extreme_mode: bool):
+def optimize(mode: str, extreme_mode: bool) -> tuple[dict, float]:
     best = {
         "span": 210,
         "chord": 65,
@@ -64,7 +68,7 @@ def optimize(mode: str, extreme_mode: bool):
     }
     best_score = simulate(best)
 
-    loops = 400 if extreme_mode else 180
+    loops = 600 if extreme_mode else 220
     for _ in range(loops):
         new = {
             "span": min(320, max(120, best["span"] + random.randint(-14, 14))),
@@ -77,11 +81,11 @@ def optimize(mode: str, extreme_mode: bool):
 
         score = simulate(new)
         if mode == "Airtime":
-            score *= (new["span"] / new["mass"])
+            score *= new["span"] / new["mass"]
         elif mode == "Distance":
-            score *= (new["velocity"] * 0.8)
+            score *= new["velocity"] * 0.8
         elif mode == "Height":
-            score *= (new["angle"] + 3)
+            score *= new["angle"] + 3
 
         if score > best_score:
             best = new
@@ -90,8 +94,9 @@ def optimize(mode: str, extreme_mode: bool):
     return best, best_score
 
 
-def create_pdf(text: str):
-    path = OUTPUT_DIR / "output.pdf"
+def create_pdf(text: str) -> str:
+    unique_name = f"report_{uuid.uuid4().hex}.pdf"
+    path = OUTPUT_DIR / unique_name
     doc = SimpleDocTemplate(str(path))
     styles = getSampleStyleSheet()
     story = [Paragraph("AeroForge+ Optimization Report", styles["Heading2"]), Spacer(1, 8)]
@@ -99,7 +104,7 @@ def create_pdf(text: str):
         if line.strip():
             story.append(Paragraph(line, styles["BodyText"]))
     doc.build(story)
-    return str(path)
+    return unique_name
 
 
 @app.post("/optimize")
@@ -109,7 +114,7 @@ async def optimize_plane(
     extreme_mode: bool = Form(False),
 ):
     extension = os.path.splitext(file.filename or "")[1].lower()
-    if extension not in {".png", ".jpg", ".jpeg", ".webp", ".pdf"}:
+    if extension not in ALLOWED_EXTENSIONS:
         return {"error": "Only image/PDF uploads are supported."}
 
     contents = await file.read()
@@ -118,6 +123,7 @@ async def optimize_plane(
     best, score = optimize(mode, extreme_mode)
 
     result_text = f"""
+Timestamp: {datetime.utcnow().isoformat()}Z
 Mode: {mode}
 Extreme mode: {extreme_mode}
 Input file: {file.filename}
@@ -131,7 +137,7 @@ Launch velocity: {best['velocity']:.2f} m/s
 Composite Score: {score:.4f}
 """
 
-    pdf_path = create_pdf(result_text)
+    pdf_name = create_pdf(result_text)
 
     return {
         "design": best,
@@ -140,15 +146,18 @@ Composite Score: {score:.4f}
         "extreme_mode": extreme_mode,
         "file_name": file.filename,
         "file_size_kb": file_size_kb,
-        "pdf_path": pdf_path,
+        "pdf_path": pdf_name,
     }
 
 
 @app.get("/download")
 def download(path: str):
-    requested = Path(path).resolve()
-    if OUTPUT_DIR.resolve() not in requested.parents and requested != OUTPUT_DIR.resolve() / "output.pdf":
-        return {"error": "Invalid report path."}
+    safe_name = Path(path).name
+    requested = OUTPUT_DIR / safe_name
+    if not requested.exists():
+        if importlib.util.find_spec("fastapi"):
+            raise HTTPException(status_code=404, detail="Report not found")
+        return {"error": "Report not found"}
     return FileResponse(str(requested), filename="plane_report.pdf")
 
 
