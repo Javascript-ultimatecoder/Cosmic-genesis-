@@ -26,7 +26,7 @@ else:
         getSampleStyleSheet,
     )
 
-app = FastAPI(title="AeroForge+", version="2.2")
+app = FastAPI(title="AeroForge+", version="2.3")
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -35,6 +35,7 @@ ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".pdf"}
 SUPPORTED_MODES = {"Distance", "Airtime", "Height", "Hybrid"}
 
 LEADERBOARD: list[dict[str, Any]] = []
+REPOSITORY_URL = os.getenv("AEROFORGE_REPOSITORY_URL", "")
 
 
 def build_ability_stats(design: dict[str, float], score: float) -> dict[str, float]:
@@ -189,7 +190,7 @@ def download(path: str):
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    return {"status": "ok", "app": app.title, "version": app.version, "python": "3"}
+    return {"status": "ok", "app": app.title, "version": app.version, "python": "3", "repository_url": REPOSITORY_URL}
 
 
 @app.get("/leaderboard")
@@ -205,3 +206,10 @@ def auth_microsoft() -> dict[str, str]:
 @app.get("/auth/google")
 def auth_google() -> dict[str, str]:
     return {"provider": "google", "status": "stub", "message": "Configure OAuth client to enable Google login."}
+
+
+@app.get("/repo")
+def repo_info() -> dict[str, str]:
+    if not REPOSITORY_URL:
+        return {"connected": "false", "message": "Set AEROFORGE_REPOSITORY_URL to connect your repo."}
+    return {"connected": "true", "repository_url": REPOSITORY_URL}

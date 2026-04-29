@@ -42,3 +42,18 @@ python3 -m uvicorn aeroforge_app:app --host 0.0.0.0 --port $PORT
 - `GET /leaderboard` → Returns top optimization runs.
 - `GET /auth/microsoft` → OAuth integration stub metadata.
 - `GET /auth/google` → OAuth integration stub metadata.
+
+
+## Connect to your AeroForge repository
+1. Set the repository URL for runtime metadata:
+```bash
+export AEROFORGE_REPOSITORY_URL="https://github.com/<your-user>/<your-repo>"
+```
+2. (Optional) connect local git remote:
+```bash
+git remote add origin https://github.com/<your-user>/<your-repo>.git
+git push -u origin work
+```
+3. Verify the app-level connection:
+- `GET /repo` returns connection status and repository URL.
+- `GET /health` includes `repository_url`.
