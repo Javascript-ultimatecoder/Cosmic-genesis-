@@ -3,96 +3,45 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AeroForge+ v2</title>
+<title>AeroForge+ v3</title>
 <style>
-:root {
-  color-scheme: dark;
-  --bg: #0b1020;
-  --card: rgba(18, 28, 52, 0.88);
-  --text: #e8eefc;
-  --accent: #66ffd1;
-}
-*{box-sizing:border-box}
-body {
-  margin: 0;
-  font-family: Inter, system-ui, sans-serif;
-  background: radial-gradient(circle at top, #1f325f, var(--bg));
-  color: var(--text);
-  min-height: 100vh;
-  padding: 16px;
-}
-.container {max-width: 760px; margin: 0 auto;}
-.card {
-  background: var(--card);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 16px;
-  padding: 16px;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 10px 30px rgba(0,0,0,.3);
-}
-label {font-size: 0.95rem; display:block; margin:8px 0 6px}
-input, select, button {
-  width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #3f4b73;
-  background:#111a34; color:#fff;
-}
-button {background: linear-gradient(90deg,#7afad7,#57a8ff); color:#061022; font-weight:700; border:none; cursor:pointer; margin-top:10px}
-pre {white-space: pre-wrap; background:#0d162e; padding:12px; border-radius:10px; overflow:auto}
-a {color: var(--accent); font-weight: 700}
-.row {display:grid; grid-template-columns:1fr; gap:10px}
-@media(min-width:640px){.row{grid-template-columns:1fr 1fr}}
+:root {--bg:#070c1e;--card:rgba(18,28,52,.88);--text:#e8eefc;--accent:#66ffd1}
+*{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,sans-serif;background:radial-gradient(circle at top,#1e2f57,var(--bg));color:var(--text);padding:16px}
+.container{max-width:980px;margin:0 auto}.card{background:var(--card);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.3);margin-bottom:14px}
+.row{display:grid;gap:10px;grid-template-columns:1fr}.split{display:grid;grid-template-columns:1fr;gap:12px} @media(min-width:820px){.split{grid-template-columns:1.1fr .9fr}.row{grid-template-columns:1fr 1fr}}
+input,select,button{width:100%;padding:12px;border-radius:10px;border:1px solid #3f4b73;background:#111a34;color:#fff}
+button{background:linear-gradient(90deg,#7afad7,#57a8ff);color:#061022;font-weight:700;border:none;cursor:pointer}
+.auth{display:flex;gap:8px}.auth button{margin:0} pre,table{width:100%;background:#0d162e;border-radius:10px;padding:12px} canvas{width:100%;max-width:360px;height:360px}
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>✈️ AeroForge+ <small style="opacity:.75">Insane v2</small></h1>
-  <div class="card">
-    <label>Upload blueprint or photo (image / PDF)</label>
-    <input type="file" id="file" accept=".png,.jpg,.jpeg,.webp,.pdf" />
-
-    <div class="row">
-      <div>
-        <label>Optimization mode</label>
-        <select id="mode">
-          <option>Distance</option>
-          <option>Airtime</option>
-          <option>Height</option>
-          <option selected>Hybrid</option>
-        </select>
-      </div>
-      <div>
-        <label style="margin-top:28px"><input type="checkbox" id="extreme" style="width:auto"/> Extreme AI Search</label>
-      </div>
+  <h1>✈️ AeroForge+ <small style="opacity:.75">Insane v3</small></h1>
+  <div class="auth card"><button onclick="oauth('microsoft')">Login with Microsoft</button><button onclick="oauth('google')">Login with Google</button></div>
+  <div class="split">
+    <div class="card">
+      <label>Upload blueprint or photo</label><input type="file" id="file" accept=".png,.jpg,.jpeg,.webp,.pdf" />
+      <div class="row"><select id="mode"><option>Distance</option><option>Airtime</option><option>Height</option><option selected>Hybrid</option></select>
+      <label><input type="checkbox" id="extreme" style="width:auto"/> Extreme AI Search</label></div>
+      <button onclick="run()">Run Optimization</button>
+      <p id="progress"></p><pre id="output">Awaiting run...</pre><a id="download" style="display:none;color:var(--accent)">Download PDF Report</a>
     </div>
-
-    <button onclick="run()">Run Optimization</button>
-    <p id="progress"></p>
-    <pre id="output">Awaiting run...</pre>
-    <a id="download" style="display:none;">Download PDF Report</a>
+    <div>
+      <div class="card"><h3>Pentagon Ability Stats</h3><canvas id="radar" width="360" height="360"></canvas></div>
+      <div class="card"><h3>Leaderboard</h3><table id="leaderboard">No runs yet.</table></div>
+    </div>
   </div>
 </div>
 <script>
-async function run(){
-  const file = document.getElementById("file").files[0];
-  if(!file){ alert("Please upload an image or PDF first."); return; }
-
-  const form = new FormData();
-  form.append("file", file);
-  form.append("mode", document.getElementById("mode").value);
-  form.append("extreme_mode", document.getElementById("extreme").checked);
-
-  document.getElementById("progress").innerText = "Running simulation + AI heuristics...";
-  const res = await fetch("/optimize", { method:"POST", body:form });
-  const data = await res.json();
-
-  document.getElementById("progress").innerText = data.error ? "Failed" : "Optimization complete";
-  document.getElementById("output").innerText = JSON.stringify(data, null, 2);
-
-  if(!data.error){
-    const a = document.getElementById("download");
-    a.style.display="inline-block";
-    a.href = "/download?path=" + encodeURIComponent(data.pdf_path);
-  }
-}
+function drawRadar(stats){const c=document.getElementById('radar'),ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);const keys=['lift','speed','stability','efficiency','ai_confidence'];const cx=180,cy=180,r=120;
+for(let ring=1;ring<=5;ring++){ctx.beginPath();for(let i=0;i<5;i++){const a=(-Math.PI/2)+(i*2*Math.PI/5);const rr=r*ring/5;const x=cx+Math.cos(a)*rr,y=cy+Math.sin(a)*rr;i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.closePath();ctx.strokeStyle='rgba(120,160,255,.22)';ctx.stroke();}
+ctx.beginPath();keys.forEach((k,i)=>{const a=(-Math.PI/2)+(i*2*Math.PI/5),rr=r*((stats[k]||0)/100),x=cx+Math.cos(a)*rr,y=cy+Math.sin(a)*rr;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.fillStyle='rgba(102,255,209,.45)';ctx.fill();ctx.strokeStyle='#66ffd1';ctx.stroke();}
+async function oauth(provider){const res=await fetch('/auth/'+provider);const data=await res.json();alert(data.message||'Auth pending');}
+async function refreshLeaderboard(){const res=await fetch('/leaderboard');const data=await res.json();const rows=(data.top_runs||[]).map((r,i)=>`<tr><td>#${i+1}</td><td>${r.mode}</td><td>${r.score}</td><td>${r.file}</td></tr>`).join('');document.getElementById('leaderboard').innerHTML=rows?`<tr><th>Rank</th><th>Mode</th><th>Score</th><th>File</th></tr>${rows}`:'No runs yet.';}
+async function run(){const file=document.getElementById('file').files[0];if(!file){alert('Please upload an image or PDF first.');return;}const form=new FormData();form.append('file',file);form.append('mode',document.getElementById('mode').value);form.append('extreme_mode',document.getElementById('extreme').checked);
+document.getElementById('progress').innerText='Running simulation + AI heuristics...';const res=await fetch('/optimize',{method:'POST',body:form});const data=await res.json();document.getElementById('progress').innerText=data.error?'Failed':'Optimization complete';document.getElementById('output').innerText=JSON.stringify(data,null,2);
+if(!data.error){const a=document.getElementById('download');a.style.display='inline-block';a.href='/download?path='+encodeURIComponent(data.pdf_path);drawRadar(data.abilities||{});refreshLeaderboard();}}
+refreshLeaderboard();
 </script>
 </body>
 </html>

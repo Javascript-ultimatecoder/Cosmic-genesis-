@@ -34,6 +34,18 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".pdf"}
 SUPPORTED_MODES = {"Distance", "Airtime", "Height", "Hybrid"}
 
+LEADERBOARD: list[dict[str, Any]] = []
+
+
+def build_ability_stats(design: dict[str, float], score: float) -> dict[str, float]:
+    return {
+        "lift": round(min(100.0, design["span"] / 3.2), 2),
+        "speed": round(min(100.0, design["velocity"] * 5.5), 2),
+        "stability": round(max(0.0, 100.0 - abs(design["balance"] - 0.33) * 320), 2),
+        "efficiency": round(min(100.0, (design["span"] / max(design["mass"], 0.1)) * 2.4), 2),
+        "ai_confidence": round(min(100.0, score * 2.2), 2),
+    }
+
 
 @app.get("/")
 def home():
@@ -145,6 +157,11 @@ Composite Score: {score:.4f}
 """
 
     pdf_name = create_pdf(result_text)
+    abilities = build_ability_stats(best, score)
+
+    LEADERBOARD.append({"mode": mode, "score": round(score, 4), "file": file.filename or "unknown"})
+    LEADERBOARD.sort(key=lambda x: x["score"], reverse=True)
+    del LEADERBOARD[10:]
 
     return {
         "design": best,
@@ -154,6 +171,8 @@ Composite Score: {score:.4f}
         "file_name": file.filename,
         "file_size_kb": file_size_kb,
         "pdf_path": pdf_name,
+        "abilities": abilities,
+        "leaderboard_rank": next((i + 1 for i, row in enumerate(LEADERBOARD) if row["score"] == round(score, 4) and row["file"] == (file.filename or "unknown")), None),
     }
 
 
@@ -171,3 +190,18 @@ def download(path: str):
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"status": "ok", "app": app.title, "version": app.version, "python": "3"}
+
+
+@app.get("/leaderboard")
+def leaderboard() -> dict[str, Any]:
+    return {"top_runs": LEADERBOARD}
+
+
+@app.get("/auth/microsoft")
+def auth_microsoft() -> dict[str, str]:
+    return {"provider": "microsoft", "status": "stub", "message": "Configure OAuth client to enable Microsoft login."}
+
+
+@app.get("/auth/google")
+def auth_google() -> dict[str, str]:
+    return {"provider": "google", "status": "stub", "message": "Configure OAuth client to enable Google login."}
