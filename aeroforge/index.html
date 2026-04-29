@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AeroForge+ v2</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0b1020;
+  --card: rgba(18, 28, 52, 0.88);
+  --text: #e8eefc;
+  --accent: #66ffd1;
+}
+*{box-sizing:border-box}
+body {
+  margin: 0;
+  font-family: Inter, system-ui, sans-serif;
+  background: radial-gradient(circle at top, #1f325f, var(--bg));
+  color: var(--text);
+  min-height: 100vh;
+  padding: 16px;
+}
+.container {max-width: 760px; margin: 0 auto;}
+.card {
+  background: var(--card);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 16px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 30px rgba(0,0,0,.3);
+}
+label {font-size: 0.95rem; display:block; margin:8px 0 6px}
+input, select, button {
+  width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #3f4b73;
+  background:#111a34; color:#fff;
+}
+button {background: linear-gradient(90deg,#7afad7,#57a8ff); color:#061022; font-weight:700; border:none; cursor:pointer; margin-top:10px}
+pre {white-space: pre-wrap; background:#0d162e; padding:12px; border-radius:10px; overflow:auto}
+a {color: var(--accent); font-weight: 700}
+.row {display:grid; grid-template-columns:1fr; gap:10px}
+@media(min-width:640px){.row{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>✈️ AeroForge+ <small style="opacity:.75">Insane v2</small></h1>
+  <div class="card">
+    <label>Upload blueprint or photo (image / PDF)</label>
+    <input type="file" id="file" accept=".png,.jpg,.jpeg,.webp,.pdf" />
+
+    <div class="row">
+      <div>
+        <label>Optimization mode</label>
+        <select id="mode">
+          <option>Distance</option>
+          <option>Airtime</option>
+          <option>Height</option>
+          <option selected>Hybrid</option>
+        </select>
+      </div>
+      <div>
+        <label style="margin-top:28px"><input type="checkbox" id="extreme" style="width:auto"/> Extreme AI Search</label>
+      </div>
+    </div>
+
+    <button onclick="run()">Run Optimization</button>
+    <p id="progress"></p>
+    <pre id="output">Awaiting run...</pre>
+    <a id="download" style="display:none;">Download PDF Report</a>
+  </div>
+</div>
+<script>
+async function run(){
+  const file = document.getElementById("file").files[0];
+  if(!file){ alert("Please upload an image or PDF first."); return; }
+
+  const form = new FormData();
+  form.append("file", file);
+  form.append("mode", document.getElementById("mode").value);
+  form.append("extreme_mode", document.getElementById("extreme").checked);
+
+  document.getElementById("progress").innerText = "Running simulation + AI heuristics...";
+  const res = await fetch("/optimize", { method:"POST", body:form });
+  const data = await res.json();
+
+  document.getElementById("progress").innerText = data.error ? "Failed" : "Optimization complete";
+  document.getElementById("output").innerText = JSON.stringify(data, null, 2);
+
+  if(!data.error){
+    const a = document.getElementById("download");
+    a.style.display="inline-block";
+    a.href = "/download?path=" + encodeURIComponent(data.pdf_path);
+  }
+}
+</script>
+</body>
+</html>
